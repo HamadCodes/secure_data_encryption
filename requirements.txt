@@ -1,2 +1,3 @@
-streamlit>=1.10.0
-cryptography>=36.0.0
+streamlit
+cryptography
+streamlit-cookies-manager
