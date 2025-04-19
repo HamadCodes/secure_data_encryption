@@ -5,6 +5,12 @@ import streamlit as st
 from cryptography.fernet import Fernet
 from streamlit_cookies_manager import EncryptedCookieManager
 
+st.set_page_config(
+    page_title="🔒 Secure Data App",
+    layout="centered",
+    initial_sidebar_state="auto"
+)
+
 # --- Configure Secrets and Cookies ---
 # Load Fernet key from environment or Streamlit secrets
 def get_fernet_cipher():
@@ -89,9 +95,6 @@ def retrieve_data(username: str, title: str, passkey: str) -> str:
     if not entry or entry["passkey_hash"] != hash_string(passkey):
         return None
     return decrypt_data(entry["encrypted"])
-
-# --- Streamlit App UI ---
-st.set_page_config(page_title="🔒 Secure Data App", layout="centered")
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
