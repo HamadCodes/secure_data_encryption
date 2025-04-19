@@ -5,11 +5,8 @@ import streamlit as st
 from cryptography.fernet import Fernet
 from streamlit_cookies_manager import EncryptedCookieManager
 
-st.set_page_config(
-    page_title="🔒 Secure Data App",
-    layout="centered",
-    initial_sidebar_state="auto"
-)
+# Page config must be first Streamlit call
+st.set_page_config(page_title="🔒 Secure Data App", layout="centered")
 
 # --- Configure Secrets and Cookies ---
 # Load Fernet key from environment or Streamlit secrets
@@ -27,7 +24,6 @@ cookies = EncryptedCookieManager(
     prefix="my-secure-app/",
     password=os.getenv("COOKIES_PASSWORD") or st.secrets.get("COOKIES_PASSWORD")
 )
-
 if not cookies.ready():
     st.stop()  # Wait until cookies are loaded
 
@@ -35,39 +31,32 @@ if not cookies.ready():
 USERS_COOKIE_KEY = "users_data"
 
 # Load users dict from cookies or initialize
-if cookies.get(USERS_COOKIE_KEY):
-    try:
-        users = json.loads(cookies[USERS_COOKIE_KEY])
-    except json.JSONDecodeError:
-        users = {}
-else:
+try:
+    users = json.loads(cookies.get(USERS_COOKIE_KEY) or "{}")
+except json.JSONDecodeError:
     users = {}
 
 # --- Utility Functions ---
 def hash_string(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
-# Encrypt raw text
 def encrypt_data(text: str) -> str:
     return cipher.encrypt(text.encode()).decode()
 
-# Decrypt encrypted text
 def decrypt_data(token: str) -> str:
     try:
         return cipher.decrypt(token.encode()).decode()
     except Exception:
         return None
 
-# Persist current users dict back to cookies
+# Persist users dict back to cookies
 def save_users_to_cookie():
     cookies[USERS_COOKIE_KEY] = json.dumps(users)
     cookies.save()
 
 # Authenticate existing user
 def authenticate(username: str, password: str) -> bool:
-    if username in users:
-        return users[username]["password_hash"] == hash_string(password)
-    return False
+    return username in users and users[username]["password_hash"] == hash_string(password)
 
 # Register a new user
 def register_user(username: str, password: str) -> bool:
@@ -89,16 +78,16 @@ def save_data(username: str, title: str, text: str, passkey: str) -> bool:
 
 # Retrieve and decrypt
 def retrieve_data(username: str, title: str, passkey: str) -> str:
-    if username not in users:
-        return None
-    entry = users[username]["data"].get(title)
+    entry = users.get(username, {}).get("data", {}).get(title)
     if not entry or entry["passkey_hash"] != hash_string(passkey):
         return None
     return decrypt_data(entry["encrypted"])
 
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-    st.session_state.current_user = None
+
+# Initialize session state variables
+for var in ["authenticated", "current_user", "failed_decrypt_attempts"]:
+    if var not in st.session_state:
+        st.session_state[var] = False if var == "authenticated" else 0 if var == "failed_decrypt_attempts" else None
 
 if not st.session_state.authenticated:
     st.title("Login or Sign Up")
@@ -107,10 +96,11 @@ if not st.session_state.authenticated:
     with tab1:
         u = st.text_input("Username", key="login_user")
         p = st.text_input("Password", type="password", key="login_pass")
-        if st.button("Login"):
+        if st.button("Login", key="btn_login"):
             if authenticate(u, p):
                 st.session_state.authenticated = True
                 st.session_state.current_user = u
+                st.session_state.failed_decrypt_attempts = 0
                 st.success("Logged in successfully!")
                 st.rerun()
             else:
@@ -120,7 +110,7 @@ if not st.session_state.authenticated:
         u2 = st.text_input("Choose Username", key="signup_user")
         p2 = st.text_input("Choose Password", type="password", key="signup_pass")
         p2c = st.text_input("Confirm Password", type="password", key="signup_pass_confirm")
-        if st.button("Sign Up"):
+        if st.button("Sign Up", key="btn_signup"):
             if not u2 or not p2:
                 st.error("Username and password required.")
             elif p2 != p2c:
@@ -131,10 +121,12 @@ if not st.session_state.authenticated:
                 st.error("Username already exists.")
 
 else:
+    # Sidebar with logout
     st.sidebar.title(f"Hello, {st.session_state.current_user}")
     if st.sidebar.button("Logout"):
         st.session_state.authenticated = False
         st.session_state.current_user = None
+        st.session_state.failed_decrypt_attempts = 0
         st.rerun()
 
     menu = st.sidebar.radio("Menu", ["Home", "Store Data", "Retrieve Data"])
@@ -148,7 +140,7 @@ else:
         title = st.text_input("Title")
         content = st.text_area("Content")
         key = st.text_input("Passkey", type="password")
-        if st.button("Save Securely"):
+        if st.button("Save Securely", key="btn_save"):
             if save_data(st.session_state.current_user, title, content, key):
                 st.success(f"'{title}' stored successfully.")
             else:
@@ -156,16 +148,27 @@ else:
 
     else:  # Retrieve Data
         st.header("Retrieve Entry")
-        user_entries = users[st.session_state.current_user]["data"].keys()
+        user_entries = list(users.get(st.session_state.current_user, {}).get("data", {}).keys())
         if user_entries:
-            sel = st.selectbox("Select Title", list(user_entries))
-            key = st.text_input("Passkey", type="password")
-            if st.button("Decrypt"):
+            sel = st.selectbox("Select Title", user_entries)
+            key = st.text_input("Passkey", type="password", key="decrypt_pass")
+            if st.button("Decrypt", key="btn_decrypt"):
                 result = retrieve_data(st.session_state.current_user, sel, key)
                 if result is not None:
                     st.success("Decrypted successfully!")
                     st.code(result)
+                    st.session_state.failed_decrypt_attempts = 0
                 else:
-                    st.error("Invalid passkey or entry.")
+                    st.session_state.failed_decrypt_attempts += 1
+                    remaining = 3 - st.session_state.failed_decrypt_attempts
+                    if remaining > 0:
+                        st.error(f"Invalid passkey. Attempts remaining: {remaining}")
+                    else:
+                        st.error("Too many failed attempts. Please log in again.")
+                        # force logout
+                        st.session_state.authenticated = False
+                        st.session_state.current_user = None
+                        st.session_state.failed_decrypt_attempts = 0
+                        st.rerun()
         else:
             st.info("No entries found. Add one via 'Store Data'.")
