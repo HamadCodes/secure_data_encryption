@@ -112,7 +112,7 @@ if not st.session_state.authenticated:
                 st.session_state.authenticated = True
                 st.session_state.current_user = u
                 st.success("Logged in successfully!")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid credentials.")
 
@@ -135,7 +135,7 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.authenticated = False
         st.session_state.current_user = None
-        st.experimental_rerun()
+        st.rerun()
 
     menu = st.sidebar.radio("Menu", ["Home", "Store Data", "Retrieve Data"])
 
